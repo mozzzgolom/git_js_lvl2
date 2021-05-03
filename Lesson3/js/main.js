@@ -37,89 +37,227 @@ const API = 'https://raw.githubusercontent.com/GeekBrainsTutorial/online-store-a
 
 // –--------------------------------
 
-class ProductList {
-    constructor(container = '.products') {
-        this.container = container
-        this._goods = [];
-        this._allProducts = [];
-
-        // this._fetchGoods();
-        this._render();
-
-        this._getProducts()
-            .then((data) => {
-                this._goods = data;
-                this._render();
-            })
+class List {
+    constructor(url, container, list = listContext){
+      this.container = container;
+      this.list = list; // словарь для классов строка 213
+      this.url = url;
+      this.goods = [];
+      this.allProducts = [];
+      this._init();
+    }
+  
+    /**
+     * получение данных с сервера
+     * @param url
+     * @returns {Promise<any | never>}
+     */
+    getJson(url){
+      return fetch(url ? url : `${API + this.url}`)
+        .then(result => result.json())
+        .catch(error => {
+          console.log(error);
+        })
+    }
+  
+    /**
+     * обработка полученных данных
+     * @param data
+     */
+    handleData(data){
+      this.goods = data;
+      this.render();
+    }
+  
+    /**
+     * подсчет стоимости всех товаров
+     * @returns {*|number}
+     */
+    calcSum(){
+      return this.allProducts.reduce((accum, item) => accum += item.price, 0);
     }
 
-    sum() {
-        return this._goods.reduce((sum, { price }) => sum + price, 0);
-    }
-
-    // _fetchGoods() {
-    //     // this._goods = [
-    //     //         {id: 1, title: 'Notebook', price: 20000},
-    //     //         {id: 2, title: 'Mouse', price: 1500},
-    //     //         {id: 3, title: 'Keyboard', price: 5000},
-    //     //         {id: 4, title: 'Gamepad', price: 4500},
-    //     //     ]
-    //     getRequest(`${API}/catalogData.json`, (data) => {
-    //         // console.log(data);
-    //         this._goods = JSON.parse(data);
-    //         console.log(this._goods);
-    //         this._render();
-    //     });
-    // }
-
-    _getProducts() {
-        return fetch(`${API}/catalogData.json`)
-            .then((Response) => Response.json())
-            .catch((error) => {
-                console.log(error);
-            });
-    }
-
-    _render() {
-        const block = document.querySelector(this.container)
-
-        for (const good of this._goods) {
-            const productObject = new ProductItem(good);
-            // console.log(productObject) 
-            this._allProducts.push(productObject);
-            block.insertAdjacentHTML('afterbegin', productObject.render());
+    render(){
+      const block = document.querySelector(this.container);
+        for (let product of this.goods){
+            console.log(this.constructor.name);
+            const productObj = new this.list[this.constructor.name](product);
+        
+            // альтернативаня реализация без словаря
+            // let productObj = null;
+            // if (this.constructor.name === 'ProductsList') productObj = new ProductItem(product);
+            // if (this.constructor.name === 'Cart') productObj = new CartItem(product);
+            if (!productObj) return;
+        
+            console.log(productObj);
+            this.allProducts.push(productObj);
+            block.insertAdjacentHTML('beforeend', productObj.render());
         }
     }
 }
 
-class ProductItem {
-    constructor(product, img = 'https://via.placeholder.com/200x150') {
-        this.title = product.product_name;
-        this.price = product.price;
-        this.id = product.id_product;
-        this.img = img;
+class Item{
+    constructor(el, img = 'https://via.placeholder.com/200x150'){
+      this.product_name = el.product_name;
+      this.price = el.price;
+      this.id_product = el.id_product;
+      this.img = img;
     }
-
-    render(title = 'default', price = 'null') {
-        return `<div class="product-item data-id "${this.id}"">
-            <img src="${this.img}" alt="Some img">
-            <h3>${this.title}</h3>
-            <p>${this.price}</p>
-            <button class="by-btn">Добавить в корзину</button></div>`
+    render(){
+      return ``;
     }
 }
 
-class Cart {
+class ProductsList extends List{
+    constructor(cart, container = '.products', url = "/catalogData.json"){
+        super(url, container);
+        this.cart = cart;
+        this.getJson()
+        .then(data => this.handleData(data));
+    }
+      
+    
+    _init(){
+        document.querySelector(this.container).addEventListener('click', e => {
+          if(e.target.classList.contains('buy-btn')){
+            this.cart.addProduct(e.target);
+          }
+        });
+    }
+}
+
+class ProductItem extends Item{
+    render() {
+        return `<div class="product-item" data-id="${this.id_product}">
+                    <img src="${this.img}" alt="Some img">
+                    <div class="desc">
+                        <h3>${this.product_name}</h3>
+                        <p>${this.price} ₽</p>
+                        <button class="buy-btn"
+                          data-id="${this.id_product}"
+                          data-name="${this.product_name}"
+                          data-price="${this.price}">Купить</button>
+                    </div>
+                </div>`;
+    }
+}
+
+class Cart extends List{
+    constructor(container = ".cart-block", url = "/getBasket.json"){
+        super(url, container);
+        this.getJson()
+          .then(data => {
+            this.handleData(data.contents);
+          });
+    }
+    
+      /**
+       * добавление товара
+       * @param element
+       */
+    addProduct(element){
+        this.getJson(`${API}/addToBasket.json`)
+          .then(data => {
+            if(data.result === 1){
+              let productId = +element.dataset['id'];
+              let find = this.allProducts.find(product => product.id_product === productId);
+              if(find){
+                find.quantity++;
+                this._updateCart(find);
+              } else {
+                let product = {
+                  id_product: productId,
+                  price: +element.dataset['price'],
+                  product_name: element.dataset['name'],
+                  quantity: 1
+                };
+                // goods - это своего рода "опорный" массив, отражающий список товаров, которые нужно отрендерить.
+                // При добавлении нового товара, нас интересует только он один.
+                this.goods = [product];
+                // далее вызывая метод render, мы добавим в allProducts только его, тем самым избегая лишнего перерендера.
+                this.render();
+              }
+            } else {
+              alert('Error');
+            }
+        })
+    }
+    
+      /**
+       * удаление товара
+       * @param element
+       */
+    removeProduct(element){
+        this.getJson(`${API}/deleteFromBasket.json`)
+          .then(data => {
+            if(data.result === 1){
+              let productId = +element.dataset['id'];
+              let find = this.allProducts.find(product => product.id_product === productId);
+              if(find.quantity > 1){ // если товара > 1, то уменьшаем количество на 1
+                find.quantity--;
+                this._updateCart(find);
+              } else { // удаляем
+                this.allProducts.splice(this.allProducts.indexOf(find), 1);
+                document.querySelector(`.cart-item[data-id="${productId}"]`).remove();
+              }
+            } else {
+              alert('Error');
+            }
+        })
+    }
+    
+      /**
+       * обновляем данные корзины
+       * @param product
+       * @private
+       */
+    _updateCart(product){
+        let block = document.querySelector(`.cart-item[data-id="${product.id_product}"]`);
+        block.querySelector('.product-quantity').textContent = `Количество: ${product.quantity}`;
+        block.querySelector('.product-price').textContent = `${product.quantity * product.price} ₽`;
+    }
+    _init(){
+        document.querySelector('.btn-cart').addEventListener('click', () => {
+          document.querySelector(this.container).classList.toggle('invisible');
+        });
+        document.querySelector(this.container).addEventListener('click', e => {
+          if(e.target.classList.contains('del-btn')){
+            this.removeProduct(e.target);
+          }
+        })
+    }
+}
+
+class CartItem extends Item{
+    constructor(el, img = 'https://via.placeholder.com/50x100'){
+        super(el, img);
+        this.quantity = el.quantity;
+      }
+    render(){
+        return `<div class="cart-item" data-id="${this.id_product}">
+                    <div class="product-bio">
+                    <img src="${this.img}" alt="Some image">
+                    <div class="product-desc">
+                    <p class="product-title">${this.product_name}</p>
+                    <p class="product-quantity">Количество: ${this.quantity}</p>
+                <p class="product-single-price">${this.price} за ед.</p>
+                </div>
+                </div>
+                <div class="right-block">
+                    <p class="product-price">${this.quantity * this.price} ₽</p>
+                    <button class="del-btn" data-id="${this.id_product}">&times;</button>
+                </div>
+                </div>`
+    }
 
 }
 
-class CartItem {
+const listContext = {
+    ProductsList: ProductItem,
+    Cart: CartItem
+};
 
-
-}
-
-
-new ProductList();
+new ProductsList(new Cart());
 
 
 // 'use strict';
@@ -144,3 +282,7 @@ new ProductList();
 // }
 
 // renderProducts(products);
+
+
+
+let str = 'One: 'Hi Mary.' Two: 'Oh, hi.''
